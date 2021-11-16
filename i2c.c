@@ -72,12 +72,11 @@ void i2c_meaningful_status(uint8_t status)
 inline void i2c_start()
 {
 	/*
-		-Set TWINT bit in TWCR reg = clears flag and starts TWI operation
-		-Set TWSTA bit in TWCR reg = generate start condition. Is cleared in function "i2c_xmit_addr"
-		-Set TWEN bit in TWCR reg = activate SCL/SDA pins and enable TWI operations
-			wait for TWINT bit to be set
+		Set TWEN bit in TWCR reg = activate SCL/SDA pins and enable TWI operations
+		TWSTA bit set in TWCR register to generate start condition, will be cleared in i2c_xmit_addr
+		TWINT bit set in TWCR register clears the flag and starts the operation of TWI
+		Await until TWI has finished its current job AKA TWINT bit is set
 	*/
-
 	TWCR = (1 << TWINT) | (1 << TWSTA) | (1 << TWEN);
 
 	while (!(TWCR & (1 << TWINT)))
@@ -86,7 +85,7 @@ inline void i2c_start()
 
 inline void i2c_stop()
 {
-	/*
+		/*
 		-Set TWINT bit in TWCR reg = clears flag and starts TWI operation
 		-Set TWSTO bit in TWCR reg = generate stop condition. Is automatically cleared after executing
 		-Set TWEN bit in TWCR reg = activate SCL/SDA pins and enable TWI operations
@@ -114,7 +113,7 @@ inline uint8_t i2c_get_status(void)
 
 inline void i2c_xmit_addr(uint8_t address, uint8_t rw)
 {
-	/*
+		/*
 		In Transmit mode, TWDR contains the next byte to be transmitted. 
 		In Receive mode, the TWDR contains the last byte received.
 
@@ -134,7 +133,7 @@ inline void i2c_xmit_addr(uint8_t address, uint8_t rw)
 
 inline void i2c_xmit_byte(uint8_t data)
 {
-	/*
+		/*
 		Assign next byte to transmit to TWDR
 
 		-Set TWINT bit in TWCR reg = clears flag and starts TWI operation
@@ -152,7 +151,7 @@ inline void i2c_xmit_byte(uint8_t data)
 
 inline uint8_t i2c_read_ACK()
 {
-	/*
+		/*
 		-Set TWINT bit in TWCR reg = clears flag and starts TWI operation
 		-Set TWEN bit in TWCR reg = activate SCL/SDA pins and enable TWI operations
 		-Set TWEA bit in TWCR reg = generates ACK pulse on the TWI bus
@@ -171,7 +170,7 @@ inline uint8_t i2c_read_ACK()
 
 inline uint8_t i2c_read_NAK()
 {
-	/*
+		/*
 		-Set TWINT bit in TWCR reg = clears flag and starts TWI operation
 		-Set TWEN bit in TWCR reg = activate SCL/SDA pins and enable TWI operations
 			wait for TWINT bit to be set and no ACK (NAK) pulse confirmed
@@ -209,7 +208,7 @@ uint8_t eeprom_read_byte(uint8_t addr)
 		-Transmit memory location
 		
 		-Start communication
-		-Transmit eeprom memory adress and read bit
+		-Transmit eeprom memory adress and Read bit
 		-Read byte from location into variable and send NAK
 
 		-Stop communication
@@ -219,7 +218,7 @@ uint8_t eeprom_read_byte(uint8_t addr)
 	uint8_t readByte;
 
 	i2c_start();
-	i2c_xmit_addr(EEPROM_ADDR,I2C_W);
+	i2c_xmit_addr(EEPROM_ADDR, I2C_W);
 	i2c_xmit_byte(addr);
 
 	i2c_start();
@@ -235,13 +234,13 @@ void eeprom_write_byte(uint8_t addr, uint8_t data)
 {
 	/*
 		-Start communication
-		-Transmit address to the EEPROM memory and Write
-
-		-Transmit location in memory
+		-Transmit eeprom memory adress and write bit
+		-Transmit memory location
+		
 		-Transmit byte to write
 
-		-Stop communication 
-		-Wait until finished writing
+		-Stop communication
+		-Wait for eeprom to finish writing
 	*/
 
 	i2c_start();
@@ -267,21 +266,94 @@ void eeprom_write_page(uint8_t addr, char *data)
 		-Wait for eeprom to finish writing
 	*/
 
+	while (addr % 8 != 0)
+	{
+		addr++;
+	}
+
 	i2c_start();
 	i2c_xmit_addr(EEPROM_ADDR, I2C_W);
 	i2c_xmit_byte(addr);
 
-	for (int i = 0; i < strlen(data); i++)
+	for (int i = 0; i < 8; i++)
 	{
 		i2c_xmit_byte(data[i]);
 	}
 
 	i2c_stop();
-	eeprom_wait_until_write_complete;
-	
+	eeprom_wait_until_write_complete();
 }
 
-void eeprom_sequential_read(uint8_t *buf, uint8_t start_addr, uint8_t len)
+void eeprom_sequential_read(char *buf, uint8_t start_addr, uint8_t len)
 {
-	// ... (VG)
+	/*
+		-Start communication
+		-Transmit eeprom memory adress and write bit
+		-Transmit memory location
+
+		-Start communication
+		-Transmit eeprom memory adress and read bit
+
+		-Read one byte at a time, assigning index value char array
+		-Generate ACK for each byte, last byte gives a NAK
+
+		-Stop communication
+	*/
+	while (start_addr % 8 != 0)
+	{
+		start_addr++;
+	}
+
+	i2c_start();
+	i2c_xmit_addr(EEPROM_ADDR, I2C_W);
+	i2c_xmit_byte(start_addr);
+
+	i2c_start();
+	i2c_xmit_addr(EEPROM_ADDR, I2C_R);
+
+	for (int i = 0; i < (len - 1); i++)
+	{
+		buf[i] = i2c_read_ACK();
+	}
+
+	buf[len - 1] = i2c_read_NAK();
+	i2c_stop();
+}
+
+void eeprom_sequential_write(uint8_t addr, char *data)
+{
+	//Store remainder of bytes after dividing up data into pages of 8 bytes
+	uint8_t singleByte = (strlen(data) % 8);
+
+	uint8_t pageData[8];
+	uint8_t pageStart;
+	uint8_t pageEnd;
+	uint8_t page;
+
+	uint8_t pages = (strlen(data) / 8);
+
+	/*
+		Iterate through data bytes, one page at a time, sequentially
+		writing to a storage variable "pageData".
+		Write each page to memory
+	*/
+	for (page = 0; page < pages; page++)
+	{
+		pageStart = page * 8;
+		pageEnd = pageStart + 8;
+
+		for (int i = pageStart; i < pageEnd; i++)
+		{
+			pageData[i - pageStart] = data[i];
+		}
+		eeprom_write_page(addr + pageStart, pageData);
+	}
+
+	//Write remainder of bytes to memory a byte at a time
+	int i = 0;
+	for (singleByte; singleByte > 0; singleByte--)
+	{
+		eeprom_write_byte((addr + (page * 8)) + i, data[(page * 8) + i]);
+		i++;
+	}
 }

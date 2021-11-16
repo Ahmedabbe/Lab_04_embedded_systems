@@ -12,15 +12,28 @@
 #include "timer.h"
 
 
-void main (void) {
+void main(void)
+{
+	char name[] = "Ahmed Alhasani heter jag";
 
 	i2c_init();
 	uart_init();
-
 	sei();
 
-	while (1) {
+	// Write bytes to eeprom memory
+	for (int i = 0; i < sizeof(name); i++)
+	{
+		eeprom_write_byte(EEPROM_ADDR_WRITE+i, name[i]);
+	}
 
+	while (1)
+	{
+		// Print out bytes stored on eeprom memory
+		for (int i = 0; i < sizeof(name); i++)
+		{
+			printf_P(PSTR("%c"), eeprom_read_byte(EEPROM_ADDR_WRITE + i));
+		}
+		printf_P(PSTR("\n"));
+		_delay_ms(1000);
 	}
 }
-

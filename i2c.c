@@ -10,9 +10,9 @@
 void i2c_init(void)
 {
 	/*
-		-Set TWEN bit in TWCR reg = enable TWI(Two Wire Interface)
-		-Set TWSR reg byte to 0x00 = prescaler of 1
-		-Set TWBR reg byte to 0x48 = sets bit rate to 100 kHz
+		Set TWEN bit in TWCR reg = enable TWI(Two Wire Interface)
+		Set TWSR reg byte to 0x00 = prescaler of 1
+		Set TWBR reg byte to 0x48 = sets bit rate to 100 kHz
 		Calculation for TWBR:
 			SCLfreq = F_CPU / (16 + (2 * TWBR * Prescaler))
 			100 000 = 16 000 000 / (16 + (2 * TWBR * 1)
@@ -77,6 +77,7 @@ inline void i2c_start()
 		-Set TWEN bit in TWCR reg = activate SCL/SDA pins and enable TWI operations
 			wait for TWINT bit to be set
 	*/
+
 	TWCR = (1 << TWINT) | (1 << TWSTA) | (1 << TWEN);
 
 	while (!(TWCR & (1 << TWINT)))
@@ -101,8 +102,10 @@ inline void i2c_stop()
 inline uint8_t i2c_get_status(void)
 {
 	/*
-
+		Reflects the status of the TWI logic
+		Status variabel is assigned value of TWSR.
 	*/
+
 	uint8_t status;
 	status = TWSR & 0xF8;
 
@@ -121,7 +124,7 @@ inline void i2c_xmit_addr(uint8_t address, uint8_t rw)
 			wait for TWINT bit to be set
 	*/
 
-	TWDR = (eeprom_addr & 0xfe) | (i2c_rw & 0x01);
+	TWDR = (address & 0xfe) | (rw & 0x01);
 
 	TWCR = (1 << TWINT) | (1 << TWEN);
 
@@ -139,7 +142,7 @@ inline void i2c_xmit_byte(uint8_t data)
 			wait for TWINT bit to be set
 	*/
 
-	TWDR = byte;
+	TWDR = data;
 
 	TWCR = (1 << TWINT) | (1 << TWEN);
 
@@ -186,22 +189,96 @@ inline uint8_t i2c_read_NAK()
 
 inline void eeprom_wait_until_write_complete()
 {
-	// ...
+	/*
+		No ACK is generated until after a writing cycle of the device is completed.
+		-Wait until cycle is completed and an ACk received
+	*/
+
+	while (i2c_get_status() != 0x18)
+	{
+		i2c_start();
+		i2c_xmit_addr(EEPROM_ADDR, I2C_W);
+	}
 }
 
 uint8_t eeprom_read_byte(uint8_t addr)
 {
-	// ...
+	/*
+		-Start communication
+		-Transmit eeprom memory adress and write bit
+		-Transmit memory location
+		
+		-Start communication
+		-Transmit eeprom memory adress and read bit
+		-Read byte from location into variable and send NAK
+
+		-Stop communication
+		-return byte value
+	*/
+
+	uint8_t readByte;
+
+	i2c_start();
+	i2c_xmit_addr(EEPROM_ADDR,I2C_W);
+	i2c_xmit_byte(addr);
+
+	i2c_start();
+	i2c_xmit_addr(EEPROM_ADDR, I2C_R);
+	readByte = i2c_read_NAK();
+
+	i2c_stop();
+
+	return readByte;
 }
 
 void eeprom_write_byte(uint8_t addr, uint8_t data)
 {
-	// ...
+	/*
+		-Start communication
+		-Transmit address to the EEPROM memory and Write
+
+		-Transmit location in memory
+		-Transmit byte to write
+
+		-Stop communication 
+		-Wait until finished writing
+	*/
+
+	i2c_start();
+	i2c_xmit_addr(EEPROM_ADDR, I2C_W);
+
+	i2c_xmit_byte(addr);
+	i2c_xmit_byte(data);
+
+	i2c_stop();
+	eeprom_wait_until_write_complete();
 }
 
-void eeprom_write_page(uint8_t addr, uint8_t *data)
+void eeprom_write_page(uint8_t addr, char *data)
 {
-	// ... (VG)
+	/*
+		-Start communication
+		-Transmit eeprom memory adress and write bit
+		-Transmit memory location
+		
+		-Transmit byte to write
+
+		-Stop communication
+		-Wait for eeprom to finish writing
+	*/
+
+	i2c_start();
+	i2c_xmit_addr(EEPROM_ADDR, I2C_W);
+	i2c_xmit_byte(addr);
+
+	for (int i = 0; i < strlen(data); i++)
+	{
+		i2c_xmit_byte(data[i]);
+	}
+
+	i2c_stop();
+	eeprom_wait_until_write_complete;
+	
 }
 
 void eeprom_sequential_read(uint8_t *buf, uint8_t start_addr, uint8_t len)
